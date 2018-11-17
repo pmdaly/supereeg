@@ -31,6 +31,7 @@ from scipy.spatial.distance import squareform
 from scipy.special import logsumexp
 from scipy import linalg
 from scipy.ndimage.interpolation import zoom
+from tqdm import tqdm
 try:
     from itertools import zip_longest
 except:
@@ -401,7 +402,7 @@ def _blur_corrmat(Z, weights):
     K_neg = np.zeros([n, n])
     W = np.zeros([n, n])
 
-    for x in range(n-1):
+    for x in tqdm(range(n-1)):
         xweights = weights[x, :]
         x_match = np.isclose(xweights, 0)
         for y in range(x+1, n): #fill in upper triangle only
