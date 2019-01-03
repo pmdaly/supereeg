@@ -322,9 +322,6 @@ class Model(object):
         if nearest_neighbor:
             bor = _near_neighbor(bor, self, match_threshold=match_threshold)
 
-        if self.locs.shape[0] > 1000:
-            warnings.warn('Model locations exceed 1000, this may take a while. Go grab a cup of coffee.')
-
         # if True will update the model with subject's correlation matrix
         if force_update:
             mo = self.update(bor, inplace=False)
