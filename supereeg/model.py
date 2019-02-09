@@ -206,8 +206,12 @@ class Model(object):
                     end = time.time()
                     print(round(end-start, 3))
 
-                    assert np.allclose(Kn, Ko, atol=1e-6, equal_nan=True)
-                    assert np.allclose(Wn, Wo, atol=1e-6, equal_nan=True)
+                    try:
+                        assert np.allclose(Kn, Ko, atol=1e-6, equal_nan=True)
+                        assert np.allclose(Wn, Wo, atol=1e-6, equal_nan=True)
+                    except:
+                        import ipdb; ipdb.set_trace()
+                        temp = 5
                     return
 
                     self.numerator, self.denominator = _blur_corrmat(Z, rbf_weights)
