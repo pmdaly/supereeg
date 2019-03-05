@@ -274,7 +274,7 @@ class Model(object):
 
 
 
-    def predict(self, bo, nearest_neighbor=False, match_threshold='auto',
+    def predict(self, bo, gpu=False, nearest_neighbor=False, match_threshold='auto',
                 force_update=False, force_include_bo_locs=True, preprocess='zscore', recon_loc_inds=None):
         """
         Takes a brain object and a 'full' covariance model, fills in all
@@ -284,6 +284,8 @@ class Model(object):
         Parameters
         ----------
         bo : a Brain, Nifti, or Model object that will be converted to a Brain object.
+        gpu: False
+            If true, computation will run be run on NVIDIA gpu(s)
         nearest_neighbor : True
             Default finds the nearest voxel for each subject's electrode
             location and uses that as revised electrodes location matrix in the
@@ -334,7 +336,8 @@ class Model(object):
         #blur out model to include brain object locations
         mo.set_locs(bor.get_locs(), force_include_bo_locs=force_include_bo_locs)
 
-        activations = _timeseries_recon(bor, mo, preprocess=preprocess, recon_loc_inds=recon_loc_inds)
+        activations = _timeseries_recon(bor, mo, preprocess=preprocess,
+                recon_loc_inds=recon_loc_inds, gpu=gpu)
 
         if not recon_loc_inds:
             loc_labels = np.array(['observed'] * len(mo.get_locs()))

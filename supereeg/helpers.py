@@ -19,6 +19,8 @@ import nibabel as nib
 import hypertools as hyp
 import shutil
 import warnings
+import torch
+import torch.nn as nn
 
 
 from nilearn import plotting as ni_plt
@@ -31,6 +33,7 @@ from scipy.spatial.distance import squareform
 from scipy.special import logsumexp
 from scipy import linalg
 from scipy.ndimage.interpolation import zoom
+from utils import chunker # TODO: personal package, update this to torch!!
 try:
     from itertools import zip_longest
 except:
@@ -507,7 +510,8 @@ def _fill_upper_triangle(M, value):
     return upper_tri
 
 
-def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore', recon_loc_inds=None):
+def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore',
+        recon_loc_inds=None, gpu=False):
     """
     Reconstruction done by chunking by session
         Parameters
@@ -568,9 +572,9 @@ def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore', recon_loc_in
     known_inds, unknown_inds = known_unknown(mo.get_locs().as_matrix(), bo.get_locs().as_matrix(),
                                                   bo.get_locs().as_matrix())
     Kaa = K[known_inds, :][:, known_inds]
-    Kaa_inv = np.linalg.pinv(Kaa)
+    Kaa_inv = np.linalg.pinv(Kaa).astype(data.dtype)
 
-    Kba = K[unknown_inds, :][:, known_inds]
+    Kba = K[unknown_inds, :][:, known_inds].astype(data.dtype)
 
     sessions = bo.sessions.unique()
     filter_chunks = []
@@ -579,24 +583,83 @@ def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore', recon_loc_in
         filter_chunks.append([x for x in i if x is not None])
     chunks=None
 
-
     if recon_loc_inds:
+
         combined_data = np.zeros((data.shape[0], len(recon_loc_inds)), dtype=data.dtype)
 
-        for x in filter_chunks:
-
-            combined_data[x,range(len(recon_loc_inds))] = _reconstruct_activity(data[x, :], Kba, Kaa_inv, recon_loc_inds=recon_loc_inds)
-
+        if gpu:
+            combined_data[:, range(len(recon_loc_inds))] = _reconstruct_gpu(data, Kba, Kba_inv,
+                    filter_chunks, recon_loc_inds=recon_loc_inds)
+        else:
+            for x in filter_chunks:
+                combined_data[x,range(len(recon_loc_inds))] = _reconstruct_cpu(
+                        data[x, :], Kba, Kaa_inv, recon_loc_inds=recon_loc_inds)
     else:
         combined_data = np.zeros((data.shape[0], K.shape[0]), dtype=data.dtype)
-        combined_data[:, unknown_inds] = np.vstack(list(map(lambda x: _reconstruct_activity(data[x, :], Kba, Kaa_inv),
-                                                            filter_chunks)))
+
+        if gpu:
+            reconstructions = _reconstruct_gpu(data, Kba, Kaa_inv, filter_chunks)
+        else:
+            reconstructions = np.vstack(list(map(lambda x: _reconstruct_cpu(data[x, :], Kba, Kaa_inv),
+                                  filter_chunks)))
+        combined_data[:, unknown_inds] = reconstructions
         combined_data[:, known_inds] = data
 
     for s in sessions:
         combined_data[bo.sessions==s, :] = zscore(combined_data[bo.sessions==s, :])
-
     return combined_data
+
+
+def _reconstruct_gpu(data, Kba, Kaa_inv, filter_chunks, chunk_size=500000, recon_loc_inds=False):
+        torch.cuda.synchronize()
+        filter_idxs = [i for j in filter_chunks for i in j]
+        Data_gpu    = torch.tensor(data[filter_idxs, :], requires_grad=False)
+        Kba_gpu     = torch.tensor(Kba, requires_grad=False)
+        Kaa_inv_gpu = torch.tensor(Kaa_inv, requires_grad=False)
+        mat_mult    = nn.Linear(in_features=Data_gpu.shape[1],
+                                out_features=Kba_gpu.shape[0],
+                                bias=False)
+        mat_mult.weight.data = Kba_gpu @ Kaa_inv_gpu
+        devices = list(range(torch.cuda.device_count()))
+        mat_mult_gpu = nn.DataParallel(mat_mult, device_ids=devices).cuda()
+        recons = list()
+        for D_block in chunker(Data_gpu, chunk_size):
+            recon = mat_mult_gpu(D_block)
+            recons.append(recon.cpu().detach().numpy())
+            del recon
+        reconstructions = np.vstack(recons)
+        if recon_loc_inds:
+            return np.squeeze(reconstructions)[:, recon_loc_inds[0]]
+        else:
+            return reconstructions
+
+
+def _reconstruct_cpu(Y, Kba, Kaa_inv, recon_loc_inds=None):
+    """
+    Reconstruct activity
+
+    Parameters
+    ----------
+    Y : numpy array
+        brain object with zscored data
+
+    Kba : correlation matrix (unknown to known)
+
+    Kaa_inv : inverse correlation matrix (known to known)
+
+    zscore = False
+
+    Returns
+    ----------
+    results : ndarray
+        Reconstructed timeseries
+
+    """
+    if recon_loc_inds:
+        return np.squeeze(np.dot(np.dot(Kba, Kaa_inv), Y.T).T)[:, recon_loc_inds[0]]
+    else:
+        return np.dot(np.dot(Kba, Kaa_inv), Y.T).T
+
 
 def _chunker(iterable, chunksize, fillvalue=None):
     """
@@ -624,32 +687,6 @@ def _chunker(iterable, chunksize, fillvalue=None):
     args = [iter(iterable)] * chunksize
     return list(zip_longest(*args, fillvalue=fillvalue))
 
-
-def _reconstruct_activity(Y, Kba, Kaa_inv, recon_loc_inds=None):
-    """
-    Reconstruct activity
-
-    Parameters
-    ----------
-    Y : numpy array
-        brain object with zscored data
-
-    Kba : correlation matrix (unknown to known)
-
-    Kaa_inv : inverse correlation matrix (known to known)
-
-    zscore = False
-
-    Returns
-    ----------
-    results : ndarray
-        Reconstructed timeseries
-
-    """
-    if recon_loc_inds:
-        return np.squeeze(np.dot(np.dot(Kba, Kaa_inv), Y.T).T)[:, recon_loc_inds[0]]
-    else:
-        return np.dot(np.dot(Kba, Kaa_inv), Y.T).T
 
 def filter_elecs(bo, measure='kurtosis', threshold=10):
     """
