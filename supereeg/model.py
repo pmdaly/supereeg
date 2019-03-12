@@ -18,6 +18,7 @@ from .nifti import Nifti
 
 
 class Model(object):
+    # TODO: _blur_corrmat is not fixed! only temporarily
     """
     Model data object for the supereeg package
 
@@ -269,8 +270,10 @@ class Model(object):
             self.denominator = self.denominator[inds, :][:, inds]
             return
         else:
+            Z = self.get_model(z_transform=True)
+            Zp = _zero_pad_corrmat(Z, self.locs, new_locs)
             rbf_weights = _log_rbf(new_locs, self.get_locs())
-            self.numerator, self.denominator = _blur_corrmat(self.get_model(z_transform=True), rbf_weights)
+            self.numerator, self.denominator = _blur_corrmat(Z, Zp, rbf_weights)
             self.locs = new_locs
 
         self.locs, loc_inds = _unique(self.locs)
