@@ -12,15 +12,19 @@ import copy
 import os
 import numpy.matlib as mat
 import matplotlib.pyplot as plt
+from multiprocessing import Pool
 import pandas as pd
 import numpy as np
 import imageio
 import nibabel as nib
 import hypertools as hyp
+import pywt
 import shutil
 import warnings
-import torch
-import torch.nn as nn
+import time
+#import torch
+#import torch.nn as nn
+from tqdm import tqdm
 
 
 from nilearn import plotting as ni_plt
@@ -34,6 +38,7 @@ from scipy.special import logsumexp
 from scipy import linalg
 from scipy.ndimage.interpolation import zoom
 from utils import chunker # TODO: personal package, update this to torch!!
+#from wavelets_pytorch.transform import WaveletTransformTorch
 try:
     from itertools import zip_longest
 except:
@@ -511,7 +516,7 @@ def _fill_upper_triangle(M, value):
 
 
 def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore',
-        recon_loc_inds=None, gpu=False):
+        recon_loc_inds=None, gpu=False, wavelet_band_reduction=False):
     """
     Reconstruction done by chunking by session
         Parameters
@@ -583,13 +588,19 @@ def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore',
         filter_chunks.append([x for x in i if x is not None])
     chunks=None
 
+    if wavelet_band_reduction:
+        # only works with CPU for the moment
+        return _reconstruct_gpu(data, Kba, Kaa_inv, filter_chunks,
+                unknown_inds, known_inds,
+                recon_loc_inds=recon_loc_inds, wavelet_band_reduction=True)
+
     if recon_loc_inds:
 
         combined_data = np.zeros((data.shape[0], len(recon_loc_inds)), dtype=data.dtype)
 
         if gpu:
-            combined_data[:, range(len(recon_loc_inds))] = _reconstruct_gpu(data, Kba, Kba_inv,
-                    filter_chunks, recon_loc_inds=recon_loc_inds)
+            combined_data[:, range(len(recon_loc_inds))] = _reconstruct_gpu(data, Kba, Kaa_inv,
+                    filter_chunks, unknown_inds, known_inds, recon_loc_inds=recon_loc_inds)
         else:
             for x in filter_chunks:
                 combined_data[x,range(len(recon_loc_inds))] = _reconstruct_cpu(
@@ -598,7 +609,8 @@ def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore',
         combined_data = np.zeros((data.shape[0], K.shape[0]), dtype=data.dtype)
 
         if gpu:
-            reconstructions = _reconstruct_gpu(data, Kba, Kaa_inv, filter_chunks)
+            reconstructions = _reconstruct_gpu(data, Kba, Kaa_inv,
+                    filter_chunks, unknown_inds, known_inds)
         else:
             reconstructions = np.vstack(list(map(lambda x: _reconstruct_cpu(data[x, :], Kba, Kaa_inv),
                                   filter_chunks)))
@@ -610,28 +622,111 @@ def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore',
     return combined_data
 
 
-def _reconstruct_gpu(data, Kba, Kaa_inv, filter_chunks, chunk_size=500000, recon_loc_inds=False):
-        torch.cuda.synchronize()
-        filter_idxs = [i for j in filter_chunks for i in j]
-        Data_gpu    = torch.tensor(data[filter_idxs, :], requires_grad=False)
-        Kba_gpu     = torch.tensor(Kba, requires_grad=False)
-        Kaa_inv_gpu = torch.tensor(Kaa_inv, requires_grad=False)
-        mat_mult    = nn.Linear(in_features=Data_gpu.shape[1],
-                                out_features=Kba_gpu.shape[0],
-                                bias=False)
-        mat_mult.weight.data = Kba_gpu @ Kaa_inv_gpu
-        devices = list(range(torch.cuda.device_count()))
-        mat_mult_gpu = nn.DataParallel(mat_mult, device_ids=devices).cuda()
-        recons = list()
-        for D_block in chunker(Data_gpu, chunk_size):
-            recon = mat_mult_gpu(D_block)
-            recons.append(recon.cpu().detach().numpy())
-            del recon
-        reconstructions = np.vstack(recons)
-        if recon_loc_inds:
-            return np.squeeze(reconstructions)[:, recon_loc_inds[0]]
+def _process_elec(elec_data):
+    elec_envs = list()
+    fs     = 512
+    scales = np.logspace(np.log10(1), np.log10(150), 25)
+    f = pywt.scale2frequency(wavelet='morl', scale=scales) * fs
+
+    for sig in chunker(elec_data, 30 * 512):
+        coefs, freqs = pywt.cwt(sig, f, 'morl', sampling_period=1/fs)
+        amps = np.abs(coefs)
+        delta   = amps[np.where((freqs >=  1) & (freqs <  4))[0], :].mean()
+        theta   = amps[np.where((freqs >=  4) & (freqs <  9))[0], :].mean()
+        alpha   = amps[np.where((freqs >=  9) & (freqs < 13))[0], :].mean()
+        beta    = amps[np.where((freqs >= 13) & (freqs < 31))[0], :].mean()
+        gamma_l = amps[np.where((freqs >= 31) & (freqs < 81))[0], :].mean()
+        gamma_h = amps[np.where(freqs >= 81)[0], :].mean()
+        elec_envs.append([delta, theta, alpha, beta, gamma_l, gamma_h])
+
+    return elec_envs
+
+
+def _wavelet_to_band_powers(signals):
+    '''
+    only working on CPU at the moment!!
+
+    Wavelet transform -> summarize per power band
+        -> Delta, Theta, Alpha, Beta, Gamma (low), Gamma (high)
+    [start, end]
+    delta: 1-4
+    theta: 5-8
+    alpha: 9-12
+    beta: 13:30
+    gaml: 31:70
+    gamh: 71:150
+    '''
+    with Pool(50) as p:
+        n_elecs = signals.shape[1]
+        pool_items = (signals[:, j] for j in range(n_elecs))
+        #power_envs = list(tqdm(p.imap(_process_elec, pool_items), total=n_elecs))
+        power_envs = list(p.imap(_process_elec, pool_items))
+    return power_envs
+
+
+def _reconstruct_gpu(data, Kba, Kaa_inv, filter_chunks, unknown_inds,
+        known_inds, chunk_size=500000, recon_loc_inds=False, wavelet_band_reduction=False):
+    if wavelet_band_reduction:
+        # some multiple of 512, 512*30*10 = 153600, seems large enough for the
+        #   moment
+        chunk_size=512*30*10
+    # TODO: better method for picking chunk_size
+    '''
+    # TODO: please update this back to GPU, this was a quick fix!!
+    torch.cuda.synchronize() # TODO: where should I put this?
+    filter_idxs = [i for j in filter_chunks for i in j]
+    Data_gpu    = torch.tensor(data[filter_idxs, :], requires_grad=False)
+    Kba_gpu     = torch.tensor(Kba, requires_grad=False)
+    Kaa_inv_gpu = torch.tensor(Kaa_inv, requires_grad=False)
+    mat_mult    = nn.Linear(in_features=Data_gpu.shape[1],
+                            out_features=Kba_gpu.shape[0],
+                            bias=False)
+    mat_mult.weight.data = Kba_gpu @ Kaa_inv_gpu
+    devices = list(range(torch.cuda.device_count()))
+    mat_mult_gpu = nn.DataParallel(mat_mult, device_ids=devices).cuda()
+    '''
+    chunk_size = min(chunk_size, data.shape[0] // 2)
+    recons = list()
+    Kba_Kaa = Kba @ Kaa_inv
+    n_elecs = len(unknown_inds) + len(known_inds)
+    #for i, D_block in enumerate(chunker(Data_gpu, chunk_size)):
+    for i, idxs in enumerate(chunker(range(data.shape[0]), chunk_size)):
+        s = time.time()
+        #recon = mat_mult_gpu(D_block)
+        recon = (Kba_Kaa @ data[idxs, :].T).T
+        if wavelet_band_reduction:
+            combined_data = np.zeros((len(idxs), n_elecs), dtype=data.dtype)
+            combined_data[:, unknown_inds] = recon
+            combined_data[:, known_inds] = data[idxs, :]
+            if recon_loc_inds:
+                #bands = _wavelet_to_band_powers(
+                #        recon.cpu().detach().numpy()[: recon_loc_inds[0]])
+                bands = _wavelet_to_band_powers(combined_data[:, recon_loc_inds[0]])
+            else:
+                #bands = _wavelet_to_band_powers(recon.cpu().detach().numpy())
+                bands = _wavelet_to_band_powers(combined_data)
+            recons.append(bands)
+            del combined_data
         else:
-            return reconstructions
+            #recons.append(recon.cpu().detach().numpy())
+            recons.append(recon)
+        del recon
+        e = time.time()
+        block_time = e - s
+        print('block {}: {}'.format(i, round(e-s, 3)))
+    if wavelet_band_reduction:
+        # recons:
+        #   each item in recon is elec x 5min x band
+        #   if these are concated horizonataly (stack the cols next to each
+        #   outher), then we have the original data structure
+        stacked = np.hstack(recons)
+        print('...reduction complete -> {}'.format(stacked.shape))
+        return stacked
+    reconstructions = np.vstack(recons)
+    if recon_loc_inds:
+        return np.squeeze(reconstructions)[:, recon_loc_inds[0]]
+    else:
+        return reconstructions
 
 
 def _reconstruct_cpu(Y, Kba, Kaa_inv, recon_loc_inds=None):

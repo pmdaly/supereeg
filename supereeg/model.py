@@ -275,7 +275,8 @@ class Model(object):
 
 
     def predict(self, bo, gpu=False, nearest_neighbor=False, match_threshold='auto',
-                force_update=False, force_include_bo_locs=True, preprocess='zscore', recon_loc_inds=None):
+                force_update=False, force_include_bo_locs=True, preprocess='zscore',
+                recon_loc_inds=None, wavelet_band_reduction=False):
         """
         Takes a brain object and a 'full' covariance model, fills in all
         electrode timeseries for all missing locations and returns the new brain
@@ -337,7 +338,10 @@ class Model(object):
         mo.set_locs(bor.get_locs(), force_include_bo_locs=force_include_bo_locs)
 
         activations = _timeseries_recon(bor, mo, preprocess=preprocess,
-                recon_loc_inds=recon_loc_inds, gpu=gpu)
+                recon_loc_inds=recon_loc_inds, gpu=gpu, wavelet_band_reduction=wavelet_band_reduction)
+
+        if wavelet_band_reduction:
+            return activations
 
         if not recon_loc_inds:
             loc_labels = np.array(['observed'] * len(mo.get_locs()))
