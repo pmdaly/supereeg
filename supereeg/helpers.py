@@ -38,6 +38,7 @@ from scipy.special import logsumexp
 from scipy import linalg
 from scipy.ndimage.interpolation import zoom
 from utils import chunker # TODO: personal package, update this to torch!!
+from utils import linelength
 #from wavelets_pytorch.transform import WaveletTransformTorch
 try:
     from itertools import zip_longest
@@ -642,6 +643,14 @@ def _process_elec(elec_data):
     return elec_envs
 
 
+def _process_elec_line_length(elec_data):
+    elec_envs = list()
+    window_length = int(512 * 0.04) # window should be ~ 40ms
+    for sig in chunker(elec_data, 30 * 512):
+        elec_envs.append(linelength(sig, window_length).mean())
+    return elec_envs
+
+
 def _wavelet_to_band_powers(signals):
     '''
     only working on CPU at the moment!!
@@ -660,7 +669,8 @@ def _wavelet_to_band_powers(signals):
         n_elecs = signals.shape[1]
         pool_items = (signals[:, j] for j in range(n_elecs))
         #power_envs = list(tqdm(p.imap(_process_elec, pool_items), total=n_elecs))
-        power_envs = list(p.imap(_process_elec, pool_items))
+        #power_envs = list(p.imap(_process_elec, pool_items))
+        power_envs = list(p.imap(_process_elec_line_length, pool_items))
     return power_envs
 
 
