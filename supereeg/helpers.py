@@ -37,8 +37,20 @@ from scipy.spatial.distance import squareform
 from scipy.special import logsumexp
 from scipy import linalg
 from scipy.ndimage.interpolation import zoom
-from utils import chunker # TODO: personal package, update this to torch!!
+#from utils import chunker # TODO: personal package, update this to torch!!
 #from wavelets_pytorch.transform import WaveletTransformTorch
+
+def chunker(iterable, chunk_size, dim=0):
+    # TODO: issues with importing utils... just copy pasting this over for
+    #       now...
+    '''Returns a generator with chunk_size chunks'''
+    if dim == 0:
+        for chunk in range(0, len(iterable), chunk_size):
+            yield iterable[chunk: chunk + chunk_size]
+    else:
+        for chunk in range(0, len(iterable[0]), chunk_size):
+            yield iterable[:, chunk: chunk + chunk_size]
+
 try:
     from itertools import zip_longest
 except:
