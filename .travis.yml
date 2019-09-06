@@ -27,5 +27,8 @@ script:
   - coverage run 
 after_success:
   - codecov
+branches:
+  - master
+  - cuda-torch
 notifications:
   slack: context-lab:gLtt8NuYpyBW0ZkmwMJGtZut
