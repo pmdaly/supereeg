@@ -2,7 +2,7 @@
 
 <h2>Overview</h2>
 
-[![Build Status](https://travis-ci.org/pmdaly/supereeg.svg?branch=cuda-torch)](https://travis-ci.org/pmdaly/supereeg)
+[![Travis](https://img.shields.io/travis/pmdaly/supereeg/cuda-torch.svg?label=Travis%20CI)(https://travis-ci.org/pmdaly/supereeg)
 
 [supereeg](https://github.com/ContextLab/supereeg>) (name inspired by Robert Sawyer's [The Terminal Experiment](https://en.wikipedia.org/wiki/The_Terminal_Experiment) is a (fictional) tool for recording the electrical activities of every neuron in the living human brain.  Our approach is somewhat less ambitious, but (we think) still "super" cool: obtain high spatiotemporal estimates of activity patterns throughout the brain using data from a small(ish) number of  [implanted electrodes](https://en.wikipedia.org/wiki/Electrocorticography).  The toolbox is designed to analyze ECoG (electrocorticographic) data, e.g. from epilepsy patients undergoing pre-surgical evaluation.
 
