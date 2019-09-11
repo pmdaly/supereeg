@@ -53,6 +53,16 @@ def test_create_model_superuser():
     model = se.Model(numerator=numerator, denominator=denominator, locs=locs, n_subs=2)
     assert isinstance(model, se.Model)
 
+def test_model_gpu_predict():
+     cpu_model = se.Model(data=data[0:2], locs=locs)
+     cpu_bo = cpu_model.predict(data[3], nearest_neighbor=False)
+     gpu_model = se.Model(data=data[0:2], locs=locs)
+     gpu_model.gpu = True
+     gpu_bo = gpu_model.predict(data[3], nearest_neighbor=False)
+     assert isinstance(cpu_bo, se.Brain)
+     assert isinstance(gpu_bo, se.Brain)
+     assert np.allclose(cpu_bo.get_data(), gpu_bo.get_data())
+
 def test_model_predict():
     model = se.Model(data=data[0:2], locs=locs)
     bo = model.predict(data[0], nearest_neighbor=False)

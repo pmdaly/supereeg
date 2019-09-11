@@ -21,13 +21,10 @@ import hypertools as hyp
 import pywt
 import shutil
 import warnings
-import pycuda.autoinit
 
 from nilearn import plotting as ni_plt
 from nilearn import image
 from nilearn.input_data import NiftiMasker
-from pycuda import gpuarray
-from pycuda.compiler import SourceModule
 from scipy.stats import kurtosis, zscore, pearsonr
 from scipy.spatial.distance import pdist
 from scipy.spatial.distance import cdist
@@ -378,6 +375,10 @@ def tal2mni(r):
 
 def _blur_corrmat_pycuda(Z, Zp, weights):
 
+    import pycuda.autoinit
+    from pycuda import gpuarray
+    from pycuda.compiler import SourceModule
+
     mod = SourceModule('''
       #include <math.h>
 
@@ -726,7 +727,7 @@ def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore',
         model_locs_in_brain.extend([True]*mo.get_locs().shape[0])
 
         rbf_weights = _log_rbf(combined_locs, mo.get_locs())
-        Z = _blur_corrmat(Z, rbf_weights)
+        Z = _blur_corrmat(Z, rbf_weights, mo.gpu)
 
     K = _z2r(Z)
 

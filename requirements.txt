@@ -13,3 +13,4 @@ future
 hypertools
 six
 pywt
+pycuda
