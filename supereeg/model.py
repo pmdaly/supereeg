@@ -99,7 +99,6 @@ class Model(object):
 
         if n_subs is None:
             n_subs = 1
-
         #expanded_to_locs = False
         if not (data is None):
             if type(data) == list:
@@ -354,6 +353,12 @@ class Model(object):
 
         #blur out model to include brain object locations
         mo.set_locs(bor.get_locs(), force_include_bo_locs=force_include_bo_locs)
+
+        # older models are missing zero padded attribute
+        # TODO: fix this later!!
+        Z = self.get_model(z_transform=True)
+        Zp = _zero_pad_corrmat(Z, bo.locs, self.locs)
+        self.Zp = Zp
 
         activations = _timeseries_recon(bor, mo, preprocess=preprocess,
                 recon_loc_inds=recon_loc_inds, gpu=gpu, wavelet_band_reduction=wavelet_band_reduction)
