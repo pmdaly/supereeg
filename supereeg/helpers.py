@@ -727,7 +727,7 @@ def _timeseries_recon(bo, mo, chunk_size=1000, preprocess='zscore',
         model_locs_in_brain.extend([True]*mo.get_locs().shape[0])
 
         rbf_weights = _log_rbf(combined_locs, mo.get_locs())
-        Z = _blur_corrmat(Z, rbf_weights, mo.gpu)
+        Z = _blur_corrmat(Z, mo.Zp, rbf_weights, mo.gpu)
 
     K = _z2r(Z)
 

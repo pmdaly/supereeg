@@ -186,6 +186,7 @@ class Model(object):
             rbf_weights = _log_rbf(bo.get_locs(), self.locs, width=self.rbf_width)
             Z = self.get_model(z_transform=True)
             Zp = _zero_pad_corrmat(Z, self.locs, locs)
+            self.Zp = Zp
             self.numerator, self.denominator = _blur_corrmat(Z, Zp,
                     rbf_weights, self.gpu)
             self.locs = bo.get_locs()
@@ -195,6 +196,7 @@ class Model(object):
                     rbf_weights = _log_rbf(locs, self.locs, width=self.rbf_width)
                     Z = self.get_model(z_transform=True)
                     Zp = _zero_pad_corrmat(Z, self.locs, locs)
+                    self.Zp = Zp
                     self.numerator, self.denominator = _blur_corrmat(Z, Zp,
                             rbf_weights, self.gpu)
                     self.locs = locs
@@ -278,6 +280,7 @@ class Model(object):
             rbf_weights = _log_rbf(new_locs, self.get_locs())
             Z = self.get_model(z_transform=True)
             Zp = _zero_pad_corrmat(Z, self.locs, new_locs)
+            self.Zp = Zp
             self.numerator, self.denominator = _blur_corrmat(Z, Zp,
                     rbf_weights, self.gpu)
             self.locs = new_locs
